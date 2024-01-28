@@ -44,12 +44,12 @@ std_vars <- matrix(rep(apply(df_np_returns, 2, sd), nrow(df_np_returns)), ncol =
 standardized <- df_np_returns / std_vars
 
 # Train-validation-test split
-train_size <- floor(0.8 * nrow(standardized))
-validate_size <- floor(0.2 * nrow(standardized))
+train_size <- floor(0.7 * nrow(standardized))
+validate_size <- floor(0.3 * nrow(standardized))
 
 train_data <- standardized[1:train_size, ]
-validate_data <- standardized[(train_size + 1):(train_size + validate_size), ]
-test_data <- standardized[(train_size + validate_size + 1):nrow(standardized), ]
+#validate_data <- standardized[(train_size + 1):(train_size + validate_size), ]
+test_data <- standardized[(train_size + 1):nrow(standardized), ]
 
 # Define features and target variables
 features <- colnames(standardized)[1:11]
@@ -79,16 +79,16 @@ mse <- function(target, predicted) {
 
 # Ridge Regression
 ridge_model1 <- cv.glmnet(x = as.matrix(train), y = as.vector(train_target), alpha = 0, lambda = grid1)
-best_lambda_ridge1 <- ridge_model$lambda.min
+best_lambda_ridge1 <- ridge_model1$lambda.min
 
-ridge_pred1 <- predict(ridge_model, newx = as.matrix(test), s = best_lambda_ridge1)
+ridge_pred1 <- predict(ridge_model1, newx = as.matrix(test), s = best_lambda_ridge1)
 ridge_rsquared1 <- rsquared(test_target, ridge_pred1)
 ridge_mse1 <- mse(test_target, ridge_pred1)
 
 ridge_model2 <- cv.glmnet(x = as.matrix(train), y = as.vector(train_target), alpha = 0, lambda = grid2)
 best_lambda_ridge2 <- ridge_model2$lambda.min
 
-ridge_pred2 <- predict(ridge_model, newx = as.matrix(test), s = best_lambda_ridge2)
+ridge_pred2 <- predict(ridge_model2, newx = as.matrix(test), s = best_lambda_ridge2)
 ridge_rsquared2 <- rsquared(test_target, ridge_pred2)
 ridge_mse2 <- mse(test_target, ridge_pred2)
 
@@ -104,9 +104,9 @@ cat("Selected Features:", selected_features2, "\n")
 
 # Lasso Regression
 lasso_model1 <- cv.glmnet(x = as.matrix(train), y = as.vector(train_target), alpha = 1, lambda = grid1)
-best_lambda_lasso1 <- lasso_model$lambda.min
+best_lambda_lasso1 <- lasso_model1$lambda.min
 
-lasso_pred1 <- predict(lasso_model, newx = as.matrix(test), s = best_lambda_lasso1)
+lasso_pred1 <- predict(lasso_model1, newx = as.matrix(test), s = best_lambda_lasso1)
 lasso_rsquared1 <- rsquared(test_target, lasso_pred1)
 lasso_mse1 <- mse(test_target, lasso_pred1)
 
