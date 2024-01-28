@@ -1,28 +1,28 @@
 rm(list=ls())
+# Load libraries
 library("quantmod")
 library("PerformanceAnalytics")
 library("glmnet")
 library("caret")
 
+# Set seed for reproducibility
 set.seed(19740284)
 
 # Get S&P 500 data
-t1 = "1980-01-01"
-getSymbols("SPY", from = "1980-01-01", to = Sys.Date(), adjust = TRUE)
-#View(SPY)
-#head(SPY, 10)
+t1 <- "1980-01-01"
+getSymbols("SPY", from = t1, to = Sys.Date(), adjust = TRUE)
 
 # Assign outcome variable as next period returns
-volume = SPY[,5]
+volume <- SPY[,5]
 names(volume) <- c("SPY_vol")
-adjusted = SPY[,6]
-names(adjusted) <-c("SPY")
+adjusted <- SPY[,6]
+names(adjusted) <- c("SPY")
 next_period_returns <- na.omit(Return.calculate(adjusted))
 
 # Retrieve and engineer features
-indeces <- c("UNRATE", "DFF", "CORESTICKM159SFRBATL", "INDPRO", "BAMLH0A0HYM2", "FEDFUNDS", "MEDCPIM158SFRBCLE", "DEXUSEU")
-ind.list <- lapply(indeces, function(tic) get(getSymbols(tic, from = "2000-01-01", src = "FRED")))
-IND <- na.omit(Reduce(merge,ind.list))
+indices <- c("UNRATE", "DFF", "CORESTICKM159SFRBATL", "INDPRO", "BAMLH0A0HYM2", "FEDFUNDS", "MEDCPIM158SFRBCLE", "DEXUSEU")
+ind.list <- lapply(indices, function(tic) get(getSymbols(tic, from = "2000-01-01", src = "FRED")))
+IND <- na.omit(Reduce(merge, ind.list))
 
 # 1 week rolling average
 days <- 7
@@ -33,98 +33,111 @@ names(return_roll) <- paste("SPY", "_roll_", days, sep="")
 SPY_lag <- lag(next_period_returns$SPY, 1)
 names(SPY_lag) <- "SPY_lag"
 
+# Merge features and target variable
 df_np_returns <- na.omit(merge(IND, volume, return_roll, SPY_lag, next_period_returns))
-df_np_returns
 
 # Data Pre-processing
 sum(is.na(df_np_returns))
 
+# Standardize features
 std_vars <- matrix(rep(apply(df_np_returns, 2, sd), nrow(df_np_returns)), ncol = ncol(df_np_returns), byrow = TRUE)
 standardized <- df_np_returns / std_vars
 
-# Train-test split
+# Train-validation-test split
 train_size <- floor(0.8 * nrow(standardized))
 validate_size <- floor(0.2 * nrow(standardized))
 
-train_data <- standardized[1:train_size,]
-#validate_data <- df_np_returns[(train_size+1):(train_size+validate_size), ]
-test_data <- standardized[(train_size+1):nrow(standardized),]
+train_data <- standardized[1:train_size, ]
+validate_data <- standardized[(train_size + 1):(train_size + validate_size), ]
+test_data <- standardized[(train_size + validate_size + 1):nrow(standardized), ]
 
-train <- train_data[, 1:11]
-#validate <- validate_data[,1:11]
-test <- test_data[, 1:11]
+# Define features and target variables
+features <- colnames(standardized)[1:11]
+target <- "SPY"
 
-train_target <- train_data[,c("SPY")]
-#validate_target <- validate_data[,c("SPY")]
-test_target <- test_data[,c("SPY")]
+train <- train_data[, features]
+validate <- validate_data[, features]
+test <- test_data[, features]
+
+train_target <- train_data[, target]
+validate_target <- validate_data[, target]
+test_target <- test_data[, target]
 
 # Model implementation
-grid1 <- 10^seq(10,-2,length=100)
-grid2 <- 10^seq(15, 3, length=100)
+grid1 <- 10^seq(10, -2, length = 100)
+grid2 <- 10^seq(15, 3, length = 100)
 
-MSE <- function(prediction, target) {
-  return(mean((as.vector(prediction) - as.vector(target))^2))
+# Function to calculate R-squared
+rsquared <- function(target, predicted) {
+  1 - sum((as.vector(target) - as.vector(predicted))^2) / sum((as.vector(target) - mean(as.vector(target)))^2)
 }
 
-rsquared <- function(target, predicted) {
-  return(1 - (sum((as.vector(target) - as.vector(predicted))^2) / sum((as.vector(target) - mean(as.vector(target)))^2)))
+# Function to calculate Mean Squared Error (MSE)
+mse <- function(target, predicted) {
+  mean((as.vector(target) - as.vector(predicted))^2)
 }
 
 # Ridge Regression
-ridge1_model <- glmnet(train, train_target, alpha = 0, lambda = grid1)
-ridge2_model <- glmnet(train, train_target, alpha = 0, lambda = grid2)
+ridge_model1 <- cv.glmnet(x = as.matrix(train), y = as.vector(train_target), alpha = 0, lambda = grid1)
+best_lambda_ridge1 <- ridge_model$lambda.min
 
-ridge1_pred <- predict(ridge1_model, newx <- as.matrix(test))
-ridge2_pred <- predict(ridge2_model, newx <- as.matrix(test))
+ridge_pred1 <- predict(ridge_model, newx = as.matrix(test), s = best_lambda_ridge1)
+ridge_rsquared1 <- rsquared(test_target, ridge_pred1)
+ridge_mse1 <- mse(test_target, ridge_pred1)
 
-ridge1_rsquared <- rsquared(ridge1_pred, test_target)
-ridge2_rsquared <- rsquared(ridge2_pred, test_target)
+ridge_model2 <- cv.glmnet(x = as.matrix(train), y = as.vector(train_target), alpha = 0, lambda = grid2)
+best_lambda_ridge2 <- ridge_model2$lambda.min
 
-ridge1_mse <- MSE(ridge1_pred, test_target)
-ridge2_mse <- MSE(ridge2_pred, test_target)
+ridge_pred2 <- predict(ridge_model, newx = as.matrix(test), s = best_lambda_ridge2)
+ridge_rsquared2 <- rsquared(test_target, ridge_pred2)
+ridge_mse2 <- mse(test_target, ridge_pred2)
 
 # Lasso Regression
-lasso1_model <- glmnet(train, train_target, alpha = 1, lambda = grid1, standardize = F)
-lasso2_model <- glmnet(train, train_target, alpha = 1, lambda = grid2, standardize = F)
+lasso_model1 <- cv.glmnet(x = as.matrix(train), y = as.vector(train_target), alpha = 1, lambda = grid1)
+best_lambda_lasso1 <- lasso_model$lambda.min
 
-lasso1_pred <- predict(lasso1_model, newx <- as.matrix(test))
-lasso2_pred <- predict(lasso2_model, newx <- as.matrix(test))
+lasso_pred1 <- predict(lasso_model, newx = as.matrix(test), s = best_lambda_lasso1)
+lasso_rsquared1 <- rsquared(test_target, lasso_pred1)
+lasso_mse1 <- mse(test_target, lasso_pred1)
 
-lasso1_rsquared <- rsquared(lasso1_pred, test_target)
-lasso2_rsquared <- rsquared(lasso2_pred, test_target)
+lasso_model2 <- cv.glmnet(x = as.matrix(train), y = as.vector(train_target), alpha = 1, lambda = grid2)
+best_lambda_lasso2 <- lasso_model2$lambda.min
 
-lasso1_mse <- MSE(lasso1_pred, test_target)
-lasso2_mse <- MSE(lasso2_pred, test_target)
+lasso_pred2 <- predict(lasso_model2, newx = as.matrix(test), s = best_lambda_lasso2)
+lasso_rsquared2 <- rsquared(test_target, lasso_pred2)
+lasso_mse2 <- mse(test_target, lasso_pred2)
 
 # Elastic Net Regression
-elastic_net1_model <- glmnet(train, train_target, alpha = 0.5, lambda = grid1, standardize = F)
-elastic_net2_model <- glmnet(train, train_target, alpha = 0.5, lambda = grid2, standardize = F)
+elastic_net_model1 <- cv.glmnet(x = as.matrix(train), y = as.vector(train_target), alpha = 0.5, lambda = grid1)
+best_lambda_elastic_net1 <- elastic_net_model1$lambda.min
 
-elastic_net1_pred <- predict(elastic_net1_model, newx <- as.matrix(test))
-elastic_net2_pred <- predict(elastic_net2_model, newx <- as.matrix(test))
+elastic_net_pred1 <- predict(elastic_net_model1, newx = as.matrix(test), s = best_lambda_elastic_net1)
+elastic_net_rsquared1 <- rsquared(test_target, elastic_net_pred1)
+elastic_net_mse1 <- mse(test_target, elastic_net_pred1)
 
-elastic_net1_rsquared <- rsquared(elastic_net1_pred, test_target)
-elastic_net2_rsquared <- rsquared(elastic_net2_pred, test_target)
+elastic_net_model2 <- cv.glmnet(x = as.matrix(train), y = as.vector(train_target), alpha = 0.5, lambda = grid2)
+best_lambda_elastic_net2 <- elastic_net_model2$lambda.min
 
-elastic_net1_mse <- MSE(elastic_net1_pred, test_target)
-elastic_net2_mse <- MSE(elastic_net2_pred, test_target)
+elastic_net_pred2 <- predict(elastic_net_model2, newx = as.matrix(test), s = best_lambda_elastic_net2)
+elastic_net_rsquared2 <- rsquared(test_target, elastic_net_pred2)
+elastic_net_mse2 <- mse(test_target, elastic_net_pred2)
 
 # Results
+cat("R-squared for Ridge Regression 1:", ridge_rsquared1, "\n")
+cat("MSE for Ridge Regression:", ridge_mse1, "\n")
 
-ridge1_rsquared
-ridge2_rsquared
-ridge1_mse
-ridge2_mse
+cat("R-squared for Ridge Regression 2:", ridge_rsquared2, "\n")
+cat("MSE for Ridge Regression:", ridge_mse2, "\n")
 
-lasso1_rsquared
-lasso2_rsquared
-lasso1_mse
-lasso2_mse
+cat("R-squared for Lasso Regression 1:", lasso_rsquared1, "\n")
+cat("MSE for Lasso Regression 1:", lasso_mse1, "\n")
 
-elastic_net1_rsquared
-elastic_net2_rsquared
-elastic_net1_mse
-elastic_net2_mse
+cat("R-squared for Lasso Regression 2:", lasso_rsquared2, "\n")
+cat("MSE for Lasso Regression 2:", lasso_mse2, "\n")
 
-nrow(test)
-nrow(train)
+cat("R-squared for Elastic Net Regression 1:", elastic_net_rsquared1, "\n")
+cat("MSE for Elastic Net Regression 1:", elastic_net_mse1, "\n")
+
+cat("R-squared for Elastic Net Regression 2:", elastic_net_rsquared2, "\n")
+cat("MSE for Elastic Net Regression 2:", elastic_net_mse2, "\n")
+
