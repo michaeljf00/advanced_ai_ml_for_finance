@@ -56,11 +56,9 @@ features <- colnames(standardized)[1:11]
 target <- "SPY"
 
 train <- train_data[, features]
-validate <- validate_data[, features]
 test <- test_data[, features]
 
 train_target <- train_data[, target]
-validate_target <- validate_data[, target]
 test_target <- test_data[, target]
 
 # Model implementation
