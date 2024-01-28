@@ -92,6 +92,16 @@ ridge_pred2 <- predict(ridge_model, newx = as.matrix(test), s = best_lambda_ridg
 ridge_rsquared2 <- rsquared(test_target, ridge_pred2)
 ridge_mse2 <- mse(test_target, ridge_pred2)
 
+# Lasso Coefficients
+ridge_coefficients1 <- as.matrix(coef(ridge_model1, s = "lambda.min"))
+ridge_coefficients2 <- as.matrix(coef(ridge_model2, s = "lambda.min"))
+
+selected_features1 <- rownames(ridge_coefficients1)[ridge_coefficients1 != 0]
+selected_features2 <- rownames(ridge_coefficients2)[ridge_coefficients2 != 0]
+
+cat("Selected Features:", selected_features1, "\n")
+cat("Selected Features:", selected_features2, "\n")
+
 # Lasso Regression
 lasso_model1 <- cv.glmnet(x = as.matrix(train), y = as.vector(train_target), alpha = 1, lambda = grid1)
 best_lambda_lasso1 <- lasso_model$lambda.min
@@ -107,20 +117,41 @@ lasso_pred2 <- predict(lasso_model2, newx = as.matrix(test), s = best_lambda_las
 lasso_rsquared2 <- rsquared(test_target, lasso_pred2)
 lasso_mse2 <- mse(test_target, lasso_pred2)
 
+# Lasso Coefficients
+lasso_coefficients1 <- as.matrix(coef(lasso_model1, s = "lambda.min"))
+lasso_coefficients2 <- as.matrix(coef(lasso_model2, s = "lambda.min"))
+
+selected_features1 <- rownames(lasso_coefficients1)[lasso_coefficients1 != 0]
+selected_features2 <- rownames(lasso_coefficients2)[lasso_coefficients2 != 0]
+
+cat("Selected Features:", selected_features1, "\n")
+cat("Selected Features:", selected_features2, "\n")
+
+
 # Elastic Net Regression
-elastic_net_model1 <- cv.glmnet(x = as.matrix(train), y = as.vector(train_target), alpha = 0.5, lambda = grid1)
+elastic_net_model1 <- cv.glmnet(x = as.matrix(train), y = as.vector(train_target), alpha = 0.6, lambda = grid1)
 best_lambda_elastic_net1 <- elastic_net_model1$lambda.min
 
 elastic_net_pred1 <- predict(elastic_net_model1, newx = as.matrix(test), s = best_lambda_elastic_net1)
 elastic_net_rsquared1 <- rsquared(test_target, elastic_net_pred1)
 elastic_net_mse1 <- mse(test_target, elastic_net_pred1)
 
-elastic_net_model2 <- cv.glmnet(x = as.matrix(train), y = as.vector(train_target), alpha = 0.5, lambda = grid2)
+elastic_net_model2 <- cv.glmnet(x = as.matrix(train), y = as.vector(train_target), alpha = 0.6, lambda = grid2)
 best_lambda_elastic_net2 <- elastic_net_model2$lambda.min
 
 elastic_net_pred2 <- predict(elastic_net_model2, newx = as.matrix(test), s = best_lambda_elastic_net2)
 elastic_net_rsquared2 <- rsquared(test_target, elastic_net_pred2)
 elastic_net_mse2 <- mse(test_target, elastic_net_pred2)
+
+# Elastic Net Coefficients
+e_net_coefficients1 <- as.matrix(coef(elastic_net_model1, s = "lambda.min"))
+e_net_coefficients2 <- as.matrix(coef(elastic_net_model2, s = "lambda.min"))
+
+selected_features1 <- rownames(e_net_coefficients1)[e_net_coefficients1 != 0]
+selected_features2 <- rownames(e_net_coefficients2)[e_net_coefficients2 != 0]
+
+cat("Selected Features:", selected_features1, "\n")
+cat("Selected Features:", selected_features2, "\n")
 
 # Results
 cat("R-squared for Ridge Regression 1:", ridge_rsquared1, "\n")
