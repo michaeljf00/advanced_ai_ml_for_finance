@@ -1,0 +1,390 @@
+---
+title: 'AIML for Finance - HW01 - Solution'
+author: 'Brian Clark'
+date: 'Fall 2024'
+output:
+  pdf_document: 
+    highlight: breezedark
+    number_sections: yes
+    toc: yes
+  html_notebook: breezedark
+fig_width: 20
+bibliography: bib.bib
+---
+***
+\clearpage
+
+# Overview
+This document is an extension of the code used in the Quantmod R-vignette.
+
+# Downloading Stock Data into R using "quantmod""
+Prior to starting, you need to install the "quantmod" package.  For this example, we download daily equity data for six stocks starting on January 1, 1980.  We will use the SPY as the 
+
+```{r, results="hide", warning=FALSE, message=FALSE}
+rm(list=ls())
+library(quantmod)
+library(lubridate)
+library(plyr)
+library(glmnet)
+library(PerformanceAnalytics)
+library(ggplot2)
+library(plotly)
+library(parallel)
+library(reshape2)
+
+t1 <- "2010-01-01"
+v <- c("SPY")
+P.list <- lapply(v, function(sym) get(getSymbols(sym,from = t1)) )
+```
+
+Summarize the data.
+
+```{r}
+head(P.list[[1]],10)
+
+## ------------------------------------------------------------------------
+sapply(P.list,dim)
+
+## ------------------------------------------------------------------------
+lapply(P.list, function(x)  first(date(x)) )
+
+## ------------------------------------------------------------------------
+P.list5 <- lapply(P.list, function(x) x[,5])
+P.list6 <- lapply(P.list, function(x) x[,6])
+
+## ------------------------------------------------------------------------
+VOL <- na.omit(Reduce(function(...) merge(...),P.list5 ))
+PRC <- na.omit(Reduce(function(...) merge(...),P.list6 ))
+
+head(VOL, 5)
+
+head(PRC, 5)
+```
+
+$P.5$ and $P.6$ are `xts` `zoo` objects containing the daily volume and adjusted price of $SPY$.
+
+```{r}
+# adjust names
+names(PRC) <- names(VOL) <- c("SPY")
+names(VOL) <- paste(names(PRC),"vol",sep = "_")
+head(PRC,5)
+head(VOL,5)
+```
+
+Next, let's compute the returns to forecast.
+
+```{r}
+## ------------------------------------------------------------------------
+R <- Return.calculate(PRC)
+head(R, 5)
+```
+
+Let's say we wanted a rolling average of the returns to implement a momentum strategy.  We can use the rollapply() function.
+
+```{r, warning=FALSE}
+# add 5-day rolling average: 
+n.days <- 5
+R_roll_5 <- rollapply(R,n.days,mean)
+names(R_roll_5) <- paste(names(R_roll_5),"_roll_",n.days,sep="")
+
+n.days <- 10
+R_roll_10 <- rollapply(R,n.days,mean)
+names(R_roll_10) <- paste(names(R_roll_10),"_roll_",n.days,sep="")
+
+n.days <- 30
+R_roll_30 <- rollapply(R,n.days,mean)
+names(R_roll_30) <- paste(names(R_roll_30),"_roll_",n.days,sep="")
+
+n.days <- 90
+R_roll_90 <- rollapply(R,n.days,mean)
+names(R_roll_90) <- paste(names(R_roll_90),"_roll_",n.days,sep="")
+
+
+R <- na.omit(merge(R,R_roll_5,R_roll_10,R_roll_30,R_roll_90,VOL))
+
+# Generate a few other vars:
+R$SPY_MOM.1 <- R$SPY_roll_5 - R$SPY_roll_10
+R$SPY_MOM.2 <- R$SPY_roll_30 - R$SPY_roll_90
+R$SPY_vol.lag <- stats::lag(R$SPY_vol,1)
+R$SPY_vol.chg <- (R$SPY_vol - R$SPY_vol.lag)/R$SPY_vol.lag
+
+SPY_fwd <- stats::lag(R$SPY,-1) # Negative lag moves it forward
+names(SPY_fwd) <- "SPY_fwd"
+R <- na.omit(merge(SPY_fwd,R))
+
+## ------------------------------------------------------------------------
+range(date(R))
+
+## ------------------------------------------------------------------------
+# View(cor(R))
+
+
+# stack into a dataset rather than an xts object
+ds <- data.frame(date = date(R),R)
+rownames(ds) <- NULL
+
+library("kableExtra")
+
+kable(ds[c(1:20),], digits=4) 
+
+
+```
+
+First, visualze a scatterplot.  Note that we don't expect to see much here since returns are hard to predict!
+
+```{r}
+scatter.smooth(x=ds$SPY, y=ds$SPY_fwd, main="R_t ~ R_{t-1}")  # scatterplot
+```
+
+Now run the model and output a summary of the results.
+
+```{r}
+sp.mod <- lm(SPY_fwd ~ SPY,data=ds)
+print(sp.mod)
+summary(sp.mod)
+```
+
+While the lagged returns are statistically significant, they explain virtually none of the errow as the $adj-R^2 = 0.01913$ is tiny.
+
+# LASSO and Ridge Regressions:
+
+Now we can run the LASSO and RIDGE regressions.
+
+First, divide the sample into a training and test set.  Let's split by time to make it realistic. We will also use the train-validate-test approach.
+
+
+```{r}
+library("glmnet")
+library("ISLR")
+
+x     <- model.matrix(SPY_fwd~.,R)[,-1]
+head(x)
+
+y     <- R$SPY_fwd
+head(y)
+
+```
+
+Examine the dates of the data:
+```{r}
+my.dates <- as.Date(rownames(x))
+head(my.dates)
+tail(my.dates)
+```
+
+Choose some split dates.
+
+```{r}
+library("glmnet")
+library("ISLR")
+
+d1 <- min(my.dates)
+d2 <- as.Date("2021-12-31")
+d3 <- as.Date("2022-12-31")
+
+idx1 <- which(my.dates >= d1 & my.dates <= d2)
+idx2 <- which(my.dates > d2 & my.dates <= d3)
+idx3 <- which(my.dates > d3)
+
+# Look at the dates:
+head(my.dates[idx1],3)
+tail(my.dates[idx1],3)
+
+head(my.dates[idx2],3)
+tail(my.dates[idx2],3)
+
+head(my.dates[idx3],3)
+tail(my.dates[idx3],3)
+
+```
+
+Finally, save the datasets.
+
+
+```{r}
+x.1 <- x[idx1,] # train
+x.2 <- x[idx2,] # validation
+x.3 <- x[idx3,] # test
+
+y.1 <- y[idx1,]
+y.2 <- y[idx2,]
+y.3 <- y[idx3,]
+
+```
+
+## Run Ridge Regressions:
+
+First, we will fir the models using the training data and then test them on the validation sample to tune the model (i.e., choose the optimal hyperparameter).
+
+```{r}
+# grid <- c(10^seq(5,-7,length=99),0)
+
+# First the unstandardized data with glmnet's standardize = T:
+ridge.mod.T <- glmnet(x.1,y.1,
+                      alpha=0,
+                      nlambda=100,
+                      standardize = T,
+                      thresh=1e-16)
+ridge.mod.T$lambda # Will find all the lambdas that were tried (the lowest value is the one closest too overfitting)
+coef(ridge.mod.T) # Gets the coefficients # Intercept here is average return
+
+
+# Make predictions for all the lambdas used in the previous step 
+valid.hat <- predict.glmnet(ridge.mod.T,
+                      newx=x.2,
+                      s = ridge.mod.T$lambda) # s = ridge.mod.T$lambda fits in all values of lambda, giving you a different regression model each
+
+# Note there are 100 models (lambdas) and each predicts one year of returns.
+dim(valid.hat) # For valid.hat, variance increases as it goes goes right
+
+# Compute OOS R2:
+R2 <- function(pred,act){
+  rss <- sum((pred - act) ^ 2)  ## residual sum of squares
+  tss <- sum((act - mean(act)) ^ 2)  ## total sum of squares
+  rsq <- 1 - rss/tss
+}
+
+R2_gu <- function(pred,act){
+  rss <- sum((pred - act) ^ 2)  ## residual sum of squares
+  tss <- sum((act - 0) ^ 2)  ## Note the TSS is NOT normalized by mean
+  rsq <- 1 - rss/tss
+}
+
+# Compute the R2 of each model to select the correct lambdas:
+valid.R2 <- apply(valid.hat,2,function(x){R2(x,y.2)}) # For each of the 100 values, the rsquared is calculated
+valid.R2_gu <- apply(valid.hat,2,function(x){R2_gu(x,y.2)})
+
+plot(valid.R2)
+
+plot(valid.R2_gu)
+```
+
+Now we have the $R^2$ of the validation sets so simply choose the best $R^2$ value from the tests and use that lambda to refit the data and make our final predictions.
+
+```{r}
+# Choose best model:
+idx.lambda <- which.max(valid.R2)
+idx.lambda
+
+# Set lambda:
+lambda.opt <- ridge.mod.T$lambda[idx.lambda]
+lambda.opt
+
+# Make final predictions:
+
+# 1. Combine training and validation samples:
+x.final <- rbind(x.1,x.2)
+y.final <- rbind(y.1,y.2)
+dim(x.final)
+dim(y.final)
+
+# Fit the final model:
+ridge.mod.final <- glmnet(x.final,y.final,
+                      alpha=0,
+                      lambda=lambda.opt,
+                      standardize = T,
+                      thresh=1e-16)
+
+ridge.mod.final
+summary(ridge.mod.final)
+str(ridge.mod.final)
+
+
+# Finally, make our final predicitons in the test sample:
+test.hat <- predict.glmnet(ridge.mod.final,
+                      newx=x.3,
+                      s = lambda.opt)
+
+# Note there is only 1 model (lambda) and each predicts one year of returns.
+dim(test.hat)
+
+# Compute the R2 of each model to select the correct lambdas:
+test.R2 <- apply(test.hat,2,function(x){R2(x,y.3)})
+test.R2
+
+```
+
+We could also plot the predictions vs. actual returns:
+
+```{r}
+dat.plt <- cbind(as.data.frame(y.3),as.data.frame(test.hat))
+head(dat.plt)
+dat.plt$day <- as.Date(rownames(dat.plt))
+
+dat <- melt(dat.plt,id="day")
+
+p <- ggplot(dat,aes(x=day,y=value,colour=variable)) + 
+  xlab("Date") + ylab("Return") + geom_line()
+
+p
+
+```
+
+
+## Repeat for a an Overfit Lambda
+
+```{r}
+# Choose best model:
+idx.bad <- which.min(ridge.mod.T$lambda) 
+
+# Set lambda:
+lambda.bad <- ridge.mod.T$lambda[idx.bad] # value of lambda is the maximum rqsquared value
+lambda.bad
+
+# Make final predictions:
+
+
+
+# Fit the final model:
+ridge.mod.bad <- glmnet(x.final,y.final,
+                      alpha=0,
+                      lambda=lambda.bad,
+                      standardize = T,
+                      thresh=1e-16)
+
+ridge.mod.bad
+summary(ridge.mod.bad)
+str(ridge.mod.bad)
+
+
+# Finally, make our final predicitons in the test sample:
+test.hat.bad <- predict.glmnet(ridge.mod.bad,
+                      newx=x.3,
+                      s = lambda.bad)
+names(test.hat.bad) <- c("OverFit")
+# Compute the R2 of each model to select the correct lambdas:
+test.R2.bad <- apply(test.hat.bad,2,function(x){R2(x,y.3)})
+test.R2
+test.R2.bad
+
+```
+
+Reporiduce the plots:
+
+```{r}
+dat.plt.bad <- cbind(as.data.frame(y.3),
+                     as.data.frame(test.hat),
+                     as.data.frame(test.hat.bad))
+names(dat.plt.bad) <- c("Actual",
+                        "Best.Pred",
+                        "Overfit.Pred")
+
+head(dat.plt.bad)
+dat.plt.bad$day <- as.Date(rownames(dat.plt.bad))
+
+dat.bad <- melt(dat.plt.bad,id="day")
+
+p.bad <- ggplot(dat.bad,aes(x=day,y=value,colour=variable)) + 
+  xlab("Date") + ylab("Return") + geom_line()
+
+p.bad
+```
+
+
+\clearpage
+
+# References
+
+
+
+
