@@ -74,7 +74,7 @@ target <- "SPY"
 train <- train_data[, features]
 validate <- validation_data[, features]
 test <- test_data[, features]
-
+nrow(train)
 train_target <- train_data[, target]
 validate_target <- validation_data[, target]
 test_target <- test_data[, target]
